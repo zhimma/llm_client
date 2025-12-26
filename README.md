@@ -3,25 +3,79 @@
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-Private-red.svg)](LICENSE)
 
-OpenAI 兼容的 Go SDK,用于调用统一 LLM 平台。
+完整的 OpenAI 兼容 Go SDK,提供开箱即用的 LLM 功能。
 
 ## 特性
 
 - ✅ **OpenAI 兼容** - 完全兼容 OpenAI API 规范
+- ✅ **开箱即用** - 一行代码完成集成
+- ✅ **完整封装** - Client + Service + Handler 三层架构
 - ✅ **类型安全** - 完整的 Go 类型定义
 - ✅ **流式支持** - 支持 SSE 流式响应
-- ✅ **扩展功能** - 支持提示词管理、结构化提取等扩展功能
-- ✅ **易于使用** - 简洁的 API 设计
-
-## 安装
-
-```bash
-go get github.com/zhimma/llm_client@latest
-```
+- ✅ **扩展功能** - 支持提示词管理、结构化提取等
+- ✅ **灵活可控** - 可选择使用任意层级
 
 ## 快速开始
 
-### 基础对话
+### 方式 1: 一键集成(最简单)
+
+```go
+package main
+
+import (
+    "github.com/gin-gonic/gin"
+    llmclient "github.com/zhimma/llm_client"
+    "github.com/zhimma/llm_client/handler"
+)
+
+func main() {
+    r := gin.Default()
+
+    // 一行代码完成 LLM 功能集成
+    handler.QuickStart(r, &llmclient.Config{
+        BaseURL: "http://localhost:8888/v1",
+        APIKey:  "sk-your-api-key",
+    })
+
+    r.Run(":8080")
+}
+```
+
+### 方式 2: 分层使用(灵活控制)
+
+```go
+package main
+
+import (
+    "github.com/gin-gonic/gin"
+    llmclient "github.com/zhimma/llm_client"
+    "github.com/zhimma/llm_client/service"
+    "github.com/zhimma/llm_client/handler"
+)
+
+func main() {
+    r := gin.Default()
+
+    // 1. 创建 Client
+    client := llmclient.NewClient(&llmclient.Config{
+        BaseURL: "http://localhost:8888/v1",
+        APIKey:  "sk-your-api-key",
+    })
+
+    // 2. 创建 Service(可以在这里添加自定义逻辑)
+    svc := service.NewService(client)
+
+    // 3. 注册路由
+    llmGroup := r.Group("/v1")
+    // 可以添加中间件
+    llmGroup.Use(yourAuthMiddleware())
+    handler.RegisterRoutes(llmGroup, svc)
+
+    r.Run(":8080")
+}
+```
+
+### 方式 3: 仅使用 Client(最灵活)
 
 ```go
 package main
@@ -29,76 +83,44 @@ package main
 import (
     "context"
     "fmt"
-    "log"
 
     llmclient "github.com/zhimma/llm_client"
     "github.com/zhimma/llm_client/types"
 )
 
 func main() {
-    // 创建客户端
     client := llmclient.NewClient(&llmclient.Config{
         BaseURL: "http://localhost:8888/v1",
         APIKey:  "sk-your-api-key",
     })
 
-    // 发送对话请求
     resp, err := client.CreateChatCompletion(context.Background(), types.ChatCompletionRequest{
         Model: "qwen-max",
         Messages: []types.Message{
-            {Role: "user", Content: "你好,请介绍一下自己"},
+            {Role: "user", Content: "你好"},
         },
-        Temperature: 0.7,
-        MaxTokens:   2000,
     })
-
-    if err != nil {
-        log.Fatal(err)
-    }
 
     fmt.Println(resp.Choices[0].Message.Content)
 }
 ```
 
-### 流式对话
+## 架构
 
-```go
-stream, err := client.CreateChatCompletionStream(ctx, types.ChatCompletionRequest{
-    Model:  "qwen-max",
-    Messages: []types.Message{{Role: "user", Content: "讲个故事"}},
-    Stream: true,
-})
-
-if err != nil {
-    log.Fatal(err)
-}
-defer stream.Close()
-
-for {
-    chunk, err := stream.Recv()
-    if err == io.EOF {
-        break
-    }
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Print(chunk.Choices[0].Delta.Content)
-}
 ```
-
-### 结构化提取(扩展功能)
-
-```go
-resp, err := client.CreateChatCompletion(ctx, types.ChatCompletionRequest{
-    Model: "qwen-max",
-    Metadata: &types.Metadata{
-        PromptKey: "medical_report_expert",
-        Variables: map[string]interface{}{
-            "text": markdownContent,
-        },
-    },
-})
+llm_client/
+├── client.go           # HTTP 客户端(底层)
+├── service/           # 业务逻辑层
+│   └── service.go
+├── handler/           # Gin 路由处理器
+│   └── handler.go
+├── types/             # OpenAI 兼容类型
+│   ├── chat.go
+│   ├── models.go
+│   └── common.go
+└── internal/          # 内部实现
+    ├── http.go
+    └── stream.go
 ```
 
 ## API 文档
@@ -107,53 +129,52 @@ resp, err := client.CreateChatCompletion(ctx, types.ChatCompletionRequest{
 
 ```go
 type Config struct {
-    BaseURL string        // LLM 平台地址,如 "http://localhost:8888/v1"
+    BaseURL string        // LLM 平台地址
     APIKey  string        // API Key
-    Timeout time.Duration // 请求超时时间,默认 30s
+    Timeout time.Duration // 请求超时,默认 30s
 }
 ```
 
-### 主要方法
-
-#### Chat Completions
+### Service 接口
 
 ```go
-// 非流式对话
-func (c *Client) CreateChatCompletion(ctx context.Context, req types.ChatCompletionRequest) (*types.ChatCompletionResponse, error)
-
-// 流式对话
-func (c *Client) CreateChatCompletionStream(ctx context.Context, req types.ChatCompletionRequest) (*types.ChatCompletionStream, error)
+type LLMService interface {
+    Chat(ctx context.Context, req *types.ChatCompletionRequest) (*types.ChatCompletionResponse, *ChatCompletionStream, error)
+    ListModels(ctx context.Context) (*types.ModelsList, error)
+    GetModel(ctx context.Context, modelID string) (*types.Model, error)
+    ListProviders(ctx context.Context) (interface{}, error)
+}
 ```
 
-#### Models
+### Handler 路由
 
 ```go
-// 获取模型列表
-func (c *Client) ListModels(ctx context.Context) (*types.ModelsList, error)
+// 注册路由
+handler.RegisterRoutes(r, svc)
 
-// 获取单个模型信息
-func (c *Client) GetModel(ctx context.Context, modelID string) (*types.Model, error)
+// 提供的路由:
+// POST /chat/completions  - Chat Completions (OpenAI 兼容)
+// POST /chat             - Chat (兼容旧路径)
+// GET  /models           - 模型列表
+// GET  /models/:model    - 单个模型
+// GET  /providers        - 提供商列表
 ```
 
 ## 扩展功能
 
-通过 `Metadata` 字段可以使用平台的扩展功能:
+通过 `Metadata` 字段使用平台扩展功能:
 
 ```go
-type Metadata struct {
-    PromptKey    string                 `json:"prompt_key,omitempty"`     // 提示词版本控制
-    Variables    map[string]interface{} `json:"variables,omitempty"`      // 变量替换
-    UseMemory    bool                   `json:"use_memory,omitempty"`     // 启用记忆
-    UserIdentity map[string]string      `json:"user_identity,omitempty"`  // 用户身份
-}
+resp, err := client.CreateChatCompletion(ctx, types.ChatCompletionRequest{
+    Model: "qwen-max",
+    Metadata: &types.Metadata{
+        PromptKey: "medical_report_expert",  // 提示词版本控制
+        Variables: map[string]interface{}{   // 变量替换
+            "text": content,
+        },
+    },
+})
 ```
-
-## 示例
-
-查看 `examples/` 目录获取更多示例:
-
-- `examples/chat/` - 基础对话示例
-- `examples/streaming/` - 流式对话示例
 
 ## OpenAI 兼容性
 
@@ -163,6 +184,14 @@ type Metadata struct {
 | Streaming | SSE | ✅ |
 | Models List | `GET /v1/models` | ✅ |
 | Embeddings | `POST /v1/embeddings` | 🚧 计划中 |
+
+## 示例
+
+查看 `examples/` 目录获取更多示例:
+
+- `examples/chat/` - 基础对话
+- `examples/streaming/` - 流式对话
+- `examples/quickstart/` - 一键集成
 
 ## 许可证
 
