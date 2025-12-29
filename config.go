@@ -1,6 +1,14 @@
 package llmclient
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrMissingBaseURL = errors.New("missing BaseURL")
+	ErrMissingAPIKey  = errors.New("missing APIKey")
+)
 
 // Config LLM Client 配置
 type Config struct {
@@ -23,7 +31,7 @@ type Config struct {
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		Timeout:    30 * time.Second,
+		Timeout:    600 * time.Second,
 		MaxRetries: 3,
 		Debug:      false,
 	}
@@ -38,7 +46,7 @@ func (c *Config) Validate() error {
 		return ErrMissingAPIKey
 	}
 	if c.Timeout <= 0 {
-		c.Timeout = 30 * time.Second
+		c.Timeout = 600 * time.Second
 	}
 	if c.MaxRetries < 0 {
 		c.MaxRetries = 0

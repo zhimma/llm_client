@@ -1,121 +1,215 @@
 package llmclient
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-
-	"github.com/zhimma/llm_client/internal"
-	"github.com/zhimma/llm_client/types"
+	"io"
+	"net/http"
+	"strings"
+	"time"
 )
 
-// Client LLM 客户端
+// Client LLM HTTP 客户端 (作为服务入口)
 type Client struct {
 	config     *Config
-	httpClient *internal.HTTPClient
+	httpClient *http.Client
+
+	// 子服务封装 (使用接口)
+	Chat       Chat
+	Embeddings Embeddings
+	Models     Models
 }
 
-// NewClient 创建新的 LLM 客户端
+// NewClient 创建新的 LLM 客户端并初始化子服务
 func NewClient(config *Config) *Client {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
-	// 验证配置
 	if err := config.Validate(); err != nil {
 		panic(fmt.Sprintf("invalid config: %v", err))
 	}
 
-	return &Client{
+	c := &Client{
 		config: config,
-		httpClient: internal.NewHTTPClient(
-			config.BaseURL,
-			config.APIKey,
-			config.Timeout,
-			config.Debug,
-		),
+		httpClient: &http.Client{
+			// 不要在这里设置 Timeout，使用 Context 进行更细粒度的控制
+			Timeout: 0,
+		},
 	}
+
+	// 初始化子服务 (注入 client 引用)
+	c.Chat = NewChatService(c)
+	c.Embeddings = NewEmbeddingService(c)
+	c.Models = NewModelService(c)
+
+	return c
 }
 
-// CreateChatCompletion 创建 Chat Completion (非流式)
-func (c *Client) CreateChatCompletion(ctx context.Context, req types.ChatCompletionRequest) (*types.ChatCompletionResponse, error) {
-	// 确保不是流式请求
-	req.Stream = false
+// --- 通用底层请求方法 (仅限包内使用) ---
 
-	resp, err := c.httpClient.Post(ctx, "/chat/completions", req)
+// get 发送 GET 请求, 返回原始响应体
+func (c *Client) get(ctx context.Context, path string) (body []byte, err error) {
+	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
+	url := baseURL + path
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRequestFailed, err)
+		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 
-	var result types.ChatCompletionResponse
-	if err := internal.DecodeResponse(resp, &result); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-	}
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	req.Header.Set("X-API-Key", c.config.APIKey)
+	req.Header.Set("Content-Type", "application/json")
 
-	return &result, nil
-}
-
-// CreateChatCompletionStream 创建 Chat Completion (流式)
-func (c *Client) CreateChatCompletionStream(ctx context.Context, req types.ChatCompletionRequest) (*ChatCompletionStream, error) {
-	// 确保是流式请求
-	req.Stream = true
-
-	resp, err := c.httpClient.Post(ctx, "/chat/completions", req)
+	var resp *http.Response
+	resp, err = c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRequestFailed, err)
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response failed: %w", err)
 	}
 
-	// 检查响应状态
 	if resp.StatusCode >= 400 {
+		return nil, c.handleError(resp.StatusCode, body)
+	}
+
+	return body, nil
+}
+
+// post 发送 POST 请求, 返回原始响应体
+func (c *Client) post(ctx context.Context, path string, data interface{}) (body []byte, err error) {
+	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
+	url := baseURL + path
+
+	// 🎯 动态处理超时
+	// 如果数据中指定了超时，则使用该超时；否则使用默认的 600s
+	timeout := c.config.Timeout
+	if timeout <= 0 {
+		timeout = 600 * time.Second
+	}
+
+	// 尝试从不同的请求结构中提取超时设置
+	switch v := data.(type) {
+	case *ChatCompletionRequest:
+		if v.Timeout > 0 {
+			timeout = v.Timeout
+		}
+	case *EmbeddingRequest:
+		if v.Timeout > 0 {
+			timeout = v.Timeout
+		}
+	}
+
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request failed: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("create request failed: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	req.Header.Set("X-API-Key", c.config.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	var resp *http.Response
+	resp, err = c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response failed: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, c.handleError(resp.StatusCode, body)
+	}
+
+	return body, nil
+}
+
+// postStream 发送 POST 请求并返回流式响应
+func (c *Client) postStream(ctx context.Context, path string, data interface{}) (resp *http.Response, err error) {
+	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
+	url := baseURL + path
+
+	// 🎯 动态处理超时 (流式请求通常需要更长的生命周期，但仍受 Context 约束)
+	timeout := c.config.Timeout
+	if timeout <= 0 {
+		timeout = 600 * time.Second
+	}
+
+	switch v := data.(type) {
+	case *ChatCompletionRequest:
+		if v.Timeout > 0 {
+			timeout = v.Timeout
+		}
+	}
+
+	// 注意：流式请求不能在方法层面就结束 Context，需要由调用者管理
+	// 这里通过 timeout 设置的是请求建立的阶段，而非整个流的耗时
+	// 为了资源安全，我们为请求建立设置一个防御性超时
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, timeout)
+	// 在流式请求中，如果请求失败，我们需要显式调用 cancel
+	// 如果请求成功，cancel 将通过某种方式透传或在适当时候关闭（通常由调用者处理或通过 Body 代理）
+	// 但在此底层方法中，我们至少确保在 Do(req) 完成前或发生错误时进行保护
+	defer func() {
+		if err != nil && cancel != nil {
+			cancel()
+		}
+	}()
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request failed: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("create request failed: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	req.Header.Set("X-API-Key", c.config.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err = c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("%w: status code %d", ErrRequestFailed, resp.StatusCode)
+		return nil, c.handleError(resp.StatusCode, body)
 	}
 
-	return &ChatCompletionStream{
-		reader: internal.NewStreamReader(ctx, resp),
-	}, nil
+	return resp, nil
 }
 
-// ListModels 获取模型列表
-func (c *Client) ListModels(ctx context.Context) (*types.ModelsList, error) {
-	resp, err := c.httpClient.Get(ctx, "/models")
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRequestFailed, err)
+// handleError 处理错误响应
+func (c *Client) handleError(statusCode int, body []byte) error {
+	var errResp ErrorResponse
+	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
+		return fmt.Errorf("LLM API Error (HTTP %d): %s [%s]", statusCode, errResp.Error.Message, errResp.Error.Code)
 	}
-
-	var result types.ModelsList
-	if err := internal.DecodeResponse(resp, &result); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-	}
-
-	return &result, nil
-}
-
-// GetModel 获取单个模型信息
-func (c *Client) GetModel(ctx context.Context, modelID string) (*types.Model, error) {
-	resp, err := c.httpClient.Get(ctx, "/models/"+modelID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRequestFailed, err)
-	}
-
-	var result types.Model
-	if err := internal.DecodeResponse(resp, &result); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-	}
-
-	return &result, nil
-}
-
-// ChatCompletionStream 流式响应封装
-type ChatCompletionStream struct {
-	reader *internal.StreamReader
-}
-
-// Recv 接收下一个流式响应块
-func (s *ChatCompletionStream) Recv() (*types.ChatCompletionStreamResponse, error) {
-	return s.reader.Recv()
-}
-
-// Close 关闭流
-func (s *ChatCompletionStream) Close() error {
-	return s.reader.Close()
+	return fmt.Errorf("LLM API Error (HTTP %d): %s", statusCode, string(body))
 }
