@@ -7,10 +7,23 @@ import (
 
 // Message 消息结构
 type Message struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	Name             string `json:"name,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string      `json:"role"`
+	Content          interface{} `json:"content"` // 支持 string 或 []ContentPart
+	Name             string      `json:"name,omitempty"`
+	ReasoningContent string      `json:"reasoning_content,omitempty"`
+}
+
+// ContentPart 多模态内容部分
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// ImageURL 图片 URL 信息
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"` // auto, low, high
 }
 
 // ChatCompletionRequest 聊天补全请求
@@ -30,6 +43,14 @@ type ChatCompletionRequest struct {
 	FrequencyPenalty float64                `json:"frequency_penalty,omitempty"`
 	PresencePenalty  float64                `json:"presence_penalty,omitempty"`
 	Timeout          time.Duration          `json:"timeout,omitempty"`
+	Files            []File                 `json:"files,omitempty"` // 多模态文件输入
+}
+
+// File 多模态文件信息
+type File struct {
+	ID   string `json:"id,omitempty"`
+	Type string `json:"type"` // image, document, etc.
+	URL  string `json:"url"`
 }
 
 // UserIdentity 用户身份标识
@@ -69,9 +90,9 @@ type Usage struct {
 
 // EmbeddingRequest 向量化请求
 type EmbeddingRequest struct {
-	Model string   `json:"model"`
-	Input []string `json:"input"`
-	User  string        `json:"user,omitempty"`
+	Model   string        `json:"model"`
+	Input   []string      `json:"input"`
+	User    string        `json:"user,omitempty"`
 	Timeout time.Duration `json:"timeout,omitempty"`
 }
 
