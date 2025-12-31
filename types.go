@@ -28,7 +28,7 @@ type ImageURL struct {
 
 // ChatCompletionRequest 聊天补全请求
 type ChatCompletionRequest struct {
-	Model            string                 `json:"model,omitempty"`
+	Model            string                 `json:"model,omitempty"` // 模型标识码 (ModelCode)
 	Messages         []Message              `json:"messages,omitempty"`
 	PromptKey        string                 `json:"prompt_key,omitempty"`
 	Variables        map[string]interface{} `json:"variables,omitempty"`
@@ -69,7 +69,7 @@ type ChatCompletionResponse struct {
 	ID      string   `json:"id"`
 	Object  string   `json:"object"`
 	Created int64    `json:"created"`
-	Model   string   `json:"model"`
+	Model   string   `json:"model"` // 模型标识码 (ModelCode)
 	Choices []Choice `json:"choices"`
 	Usage   Usage    `json:"usage"`
 }
@@ -90,7 +90,7 @@ type Usage struct {
 
 // EmbeddingRequest 向量化请求
 type EmbeddingRequest struct {
-	Model   string        `json:"model"`
+	Model   string        `json:"model"` // 模型标识码 (ModelCode)
 	Input   []string      `json:"input"`
 	User    string        `json:"user,omitempty"`
 	Timeout time.Duration `json:"timeout,omitempty"`
@@ -100,7 +100,7 @@ type EmbeddingRequest struct {
 type EmbeddingResponse struct {
 	Object string          `json:"object"`
 	Data   []EmbeddingData `json:"data"`
-	Model  string          `json:"model"`
+	Model  string          `json:"model"` // 模型标识码 (ModelCode)
 	Usage  Usage           `json:"usage"`
 }
 
@@ -119,7 +119,7 @@ type ModelList struct {
 
 // ModelInfo 模型信息
 type ModelInfo struct {
-	ID      string `json:"id"`
+	ID      string `json:"id"` // 模型标识码 (ModelCode)
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
