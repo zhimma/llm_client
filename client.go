@@ -89,26 +89,26 @@ func (c *Client) post(ctx context.Context, path string, data interface{}) (body 
 	url := baseURL + path
 
 	// 🎯 动态处理超时
-	// 如果数据中指定了超时，则使用该超时；否则使用默认的 600s
-	timeout := c.config.Timeout
-	if timeout <= 0 {
-		timeout = 600 * time.Second
+	// 如果数据中指定了超时,则使用该超时;否则使用默认的 600s
+	timeoutSeconds := c.config.Timeout
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 600
 	}
 
 	// 尝试从不同的请求结构中提取超时设置
 	switch v := data.(type) {
 	case *ChatCompletionRequest:
 		if v.Timeout > 0 {
-			timeout = v.Timeout
+			timeoutSeconds = v.Timeout
 		}
 	case *EmbeddingRequest:
 		if v.Timeout > 0 {
-			timeout = v.Timeout
+			timeoutSeconds = v.Timeout
 		}
 	}
 
 	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, timeout)
+	ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
 	jsonData, err := json.Marshal(data)
@@ -149,24 +149,24 @@ func (c *Client) postStream(ctx context.Context, path string, data interface{}) 
 	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
 	url := baseURL + path
 
-	// 🎯 动态处理超时 (流式请求通常需要更长的生命周期，但仍受 Context 约束)
-	timeout := c.config.Timeout
-	if timeout <= 0 {
-		timeout = 600 * time.Second
+	// 🎯 动态处理超时 (流式请求通常需要更长的生命周期,但仍受 Context 约束)
+	timeoutSeconds := c.config.Timeout
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 600
 	}
 
 	switch v := data.(type) {
 	case *ChatCompletionRequest:
 		if v.Timeout > 0 {
-			timeout = v.Timeout
+			timeoutSeconds = v.Timeout
 		}
 	}
 
-	// 注意：流式请求不能在方法层面就结束 Context，需要由调用者管理
-	// 这里通过 timeout 设置的是请求建立的阶段，而非整个流的耗时
-	// 为了资源安全，我们为请求建立设置一个防御性超时
+	// 注意:流式请求不能在方法层面就结束 Context,需要由调用者管理
+	// 这里通过 timeout 设置的是请求建立的阶段,而非整个流的耗时
+	// 为了资源安全,我们为请求建立设置一个防御性超时
 	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, timeout)
+	ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	// 在流式请求中，如果请求失败，我们需要显式调用 cancel
 	// 如果请求成功，cancel 将通过某种方式透传或在适当时候关闭（通常由调用者处理或通过 Body 代理）
 	// 但在此底层方法中，我们至少确保在 Do(req) 完成前或发生错误时进行保护

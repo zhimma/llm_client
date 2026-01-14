@@ -2,7 +2,6 @@ package llmclient
 
 import (
 	"errors"
-	"time"
 )
 
 var (
@@ -18,8 +17,8 @@ type Config struct {
 	// APIKey API 密钥
 	APIKey string
 
-	// Timeout 请求超时时间,默认 30 秒
-	Timeout time.Duration
+	// Timeout 请求超时时间(秒),默认 600 秒
+	Timeout int
 
 	// MaxRetries 最大重试次数,默认 3 次
 	MaxRetries int
@@ -31,7 +30,7 @@ type Config struct {
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
-		Timeout:    600 * time.Second,
+		Timeout:    600, // 600秒 = 10分钟
 		MaxRetries: 3,
 		Debug:      false,
 	}
@@ -46,7 +45,7 @@ func (c *Config) Validate() error {
 		return ErrMissingAPIKey
 	}
 	if c.Timeout <= 0 {
-		c.Timeout = 600 * time.Second
+		c.Timeout = 600 // 默认600秒
 	}
 	if c.MaxRetries < 0 {
 		c.MaxRetries = 0

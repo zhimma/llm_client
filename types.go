@@ -2,7 +2,6 @@ package llmclient
 
 import (
 	"encoding/json"
-	"time"
 )
 
 // Message 消息结构
@@ -42,8 +41,8 @@ type ChatCompletionRequest struct {
 	ResponseFormat   *ResponseFormat        `json:"response_format,omitempty"`
 	FrequencyPenalty float64                `json:"frequency_penalty,omitempty"`
 	PresencePenalty  float64                `json:"presence_penalty,omitempty"`
-	Timeout          time.Duration          `json:"timeout,omitempty"`
-	Files            []File                 `json:"files,omitempty"` // 多模态文件输入
+	Timeout          int                    `json:"timeout,omitempty"` // 超时时间(秒)
+	Files            []File                 `json:"files,omitempty"`   // 多模态文件输入
 }
 
 // File 多模态文件信息
@@ -90,10 +89,10 @@ type Usage struct {
 
 // EmbeddingRequest 向量化请求
 type EmbeddingRequest struct {
-	Model   string        `json:"model"` // 模型标识码 (ModelCode)
-	Input   []string      `json:"input"`
-	User    string        `json:"user,omitempty"`
-	Timeout time.Duration `json:"timeout,omitempty"`
+	Model   string   `json:"model"` // 模型标识码 (ModelCode)
+	Input   []string `json:"input"`
+	User    string   `json:"user,omitempty"`
+	Timeout int      `json:"timeout,omitempty"` // 超时时间(秒)
 }
 
 // EmbeddingResponse 向量化响应
